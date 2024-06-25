@@ -16,6 +16,6 @@ Case_3dmodels : 3d models of case in .step format
   
 model : folder with neural network (LSTM-based autoencoder) and notebook for its training  
 
-ECG_track.py : class for ECG tracking realizing Interface.py
-socket_.py : PC program
-main.py : micropython program for ESP32
+ECG_track.py : class for ECG tracking realizing Interface.py  
+socket_.py : PC program  
+main.py : micropython program for ESP32  
