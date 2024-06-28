@@ -13,19 +13,65 @@ import joblib
 class ECG_track(Interface):
     def __init__(self,
                  path_to_res, 
-                 path_to_model, path_to_scaler, threshold = 0.1,
+                 path_to_model, path_to_scaler, threshold = 0.05,
                  fs = 250, cutoff_l = 0.5, cutoff_h = 40, order = 3,
-                 message = b"it's me",
+                 message = b"it's me", sig_len = 5
                  ):
+        '''
+        Creation the folder with results.
+        Filter initialization.
+        Neural network initialization.
+        Figure for plotting initialization.
+        Client initialization.
+
+        Parameters
+        ----------
+        path_to_res : str
+            The  directory to create a folder with the results.
+        path_to_model : str
+            The path to the model.
+        path_to_scaler : str
+            The path to the scaler.
+        threshold : float
+            Threshold for anomaly prediction.
+        fs : int
+            Sampling frequency of the input signal.
+        cutoff_l : float
+            Lower cutoff frequency of the bandpass filter.
+        cutoff_h : float
+            Higher cutoff frequency of the bandpass filter.
+        order : int
+            Bandpass filter order.
+        message : binary
+            Message to link client and server.
+        sig_len : float
+            Signal length for plot and process in sec.
+
+        Returns
+        -------
+        None 
+        '''
         self._create_dir_for_res(path_to_res)
         self._create_filter(fs, cutoff_l, cutoff_h, order)
-        self.sig_len  = int(fs/cutoff_l)
+        self.sig_len  = int(sig_len*fs)
         self._init_nn(path_to_model, path_to_scaler, threshold)
         self._init_plot()
         self._init_client(message)
 
     
     def _create_dir_for_res(self, path_to_res):   
+        '''
+        Creation of the folder with results:
+            signal_n.txt - a file with two columns (1st - Time in sec, 2nd - filtered ECGI in mV )
+
+        Parameters
+        ----------
+        path_to_res : str
+            The directory to create a folder with the results.
+        Returns
+        -------
+        None 
+        '''
         if not('results' in os.listdir(path_to_res)):
             os.mkdir(os.path.join(path_to_res, 'results'))
             f = open(os.path.join(path_to_res, 'results','num.txt'), 'x')
@@ -48,20 +94,77 @@ class ECG_track(Interface):
         
             
     def _create_filter(self, fs, cutoff_l, cutoff_h, order):
+        '''
+        Creation of the bandpass filter.
+
+        Parameters
+        ----------
+        path_to_model : str
+            The path to the model.
+        path_to_scaler : str
+            The path to the scaler.
+        threshold : float
+            Threshold for anomaly prediction.
+        
+        Returns
+        -------
+        None 
+        '''
         nyq = 0.5 * fs
         self.b, self.a = signal.butter(order, (cutoff_l / nyq, cutoff_h / nyq), btype='bandpass', analog=False)
 
     def _init_nn(self, path_to_model, path_to_scaler, threshold):
+        '''
+        Neural network initialization.
+
+        Parameters
+        ----------
+        fs : int
+            Sampling frequency of the input signal.
+        cutoff_l : float
+            Lower cutoff frequency of the bandpass filter.
+        cutoff_h : float
+            Higher cutoff frequency of the bandpass filter.
+        order : int
+            Bandpass filter order.
+        
+        Returns
+        -------
+        None 
+        '''
         self.model = load_model(path_to_model)
         self.scaler = joblib.load(path_to_scaler)
         self.threshold = threshold
 
     def _init_plot(self):
+        '''
+        Figure for plotting initialization.
+
+        Parameters
+        ----------
+        None
+        
+        Returns
+        -------
+        None 
+        '''
         plt.close('all')
         plt.figure(figsize=(16,6))        
         plt.ion()
 
     def _init_client(self, message):
+        '''
+        Client initialization.
+
+        Parameters
+        ----------
+        message : binary
+            Message to link client and server.
+        
+        Returns
+        -------
+        None 
+        '''
         self.client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.client.bind(('0.0.0.0', 5006))
         self.client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -77,6 +180,21 @@ class ECG_track(Interface):
                 break
 
     def _visualize(self, data_for_plot, scored_):
+        '''
+        Data visualization.
+
+        Parameters
+        ----------
+        data_for_plot : pandas dataframe
+            Input signal with columns ['Time', 'Target1'].
+        scored_ : pandas dataframe
+            Dataframe with anomaly detection with columns ['Loss_mae', 'Threshold', 'Anomaly'].
+            'Anomaly' - True/False
+        
+        Returns
+        -------
+        None 
+        '''
         plt.plot(data_for_plot['Time'], data_for_plot['Target1'], label='Target1', color='blue', linewidth=1)
         plt.scatter(data_for_plot['Time'][data_for_plot[scored_['Anomaly']==True]['Target1'].index],data_for_plot[scored_['Anomaly']==True]['Target1'],label='anomal',marker='.', color='red')
         plt.legend(loc='lower left')
@@ -88,6 +206,22 @@ class ECG_track(Interface):
         plt.cla()
     
     def _predict(self, data):
+        '''
+        Neural network forward pass + anomaly detection.
+
+        Parameters
+        ----------
+        data : list
+            A part of thr input signal of a given size to be processed.
+        
+        Returns
+        -------
+        pred : pandas dataframe
+            Neural network prediction.
+        scored_ : pandas dataframe
+            Dataframe with anomaly detection with columns ['Loss_mae', 'Threshold', 'Anomaly'].
+            'Anomaly' - True/False
+        '''
         data_for_pred = np.hstack([np.array([data]).T, np.array([data]).T])
         data_for_pred = self.scaler.transform(data_for_pred)
         data_for_pred = np.resize(data_for_pred, (self.sig_len,1,2))
@@ -103,6 +237,17 @@ class ECG_track(Interface):
         return pred, scored_
 
     def track(self):
+        '''
+        Signal read + detect anomaly + viasualize + save to file.
+
+        Parameters
+        ----------
+        None
+        
+        Returns
+        -------
+        None 
+        '''
         data = [] 
         time1 = []
         with open(os.path.join(self.path_to_res, 'results',f'signal_{self.exp_i}.txt'), 'a')  as file_for_sig:
